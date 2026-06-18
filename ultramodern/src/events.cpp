@@ -68,6 +68,10 @@ static struct {
         void update_vi() {
             ViState* next_state = get_next_state();
             const OSViMode* next_mode = next_state->mode;
+            if (next_mode == nullptr) {
+                // Game started but has not set a VI mode yet — nothing to scan out.
+                return;
+            }
             const OSViCommonRegs* common_regs = &next_mode->comRegs;
             const OSViFieldRegs* field_regs = &next_mode->fldRegs[field];
             PTR(void) framebuffer = osVirtualToPhysical(next_state->framebuffer);
@@ -88,6 +92,10 @@ static struct {
             // TODO implement osViFade
 
             // Update VI registers.
+            if (getenv("GEX3_VI_TRACE")) {
+                fprintf(stderr, "[vi] scanout fb=%08X origin=%08X\n",
+                        (uint32_t)next_state->framebuffer, (uint32_t)origin);
+            }
             regs.VI_ORIGIN_REG = origin;
             regs.VI_WIDTH_REG = common_regs->width;
             regs.VI_TIMING_REG = common_regs->burst;
@@ -229,13 +237,18 @@ void vi_thread_func() {
             
             std::lock_guard lock{ events_context.message_mutex };
             ViState* cur_state = events_context.vi.get_cur_state();
-            if (remaining_retraces == 0) {
+            if (remaining_retraces <= 0) {
                 if (cur_state->mq != NULLPTR) {
                     // Send a message to the VI queue, and do not set it to be requeued if the queue was full.
-                    // The worst case scenario is that the game misses a VI message and has to wait a little longer for the next. 
+                    // The worst case scenario is that the game misses a VI message and has to wait a little longer for the next.
                     ultramodern::enqueue_external_message_src(cur_state->mq, cur_state->msg, false, ultramodern::EventMessageSource::Vi);
                 }
                 remaining_retraces = cur_state->retrace_count;
+                if (remaining_retraces <= 0) {
+                    // A retrace count of zero would otherwise stall VI events forever.
+                    fprintf(stderr, "[vi] warning: retrace_count %d, clamping to 1\n", remaining_retraces);
+                    remaining_retraces = 1;
+                }
             }
             if (events_context.ai.mq != NULLPTR) {
                 // Send a message to the VI queue, and do not set it to be requeued if the queue was full for the same reason as the VI message above.
@@ -451,6 +464,9 @@ void set_dummy_vi(bool odd) {
 
 extern "C" void osViSwapBuffer(RDRAM_ARG PTR(void) frameBufPtr) {
     std::lock_guard lock{ events_context.message_mutex };
+    if (getenv("GEX3_VI_TRACE")) {
+        fprintf(stderr, "[vi] swap fb=%08X\n", (uint32_t)frameBufPtr);
+    }
     events_context.vi.get_next_state()->framebuffer = frameBufPtr;
 }
 

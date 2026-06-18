@@ -483,7 +483,9 @@ void init(uint8_t* rdram, recomp_context* ctx, gpr entrypoint) {
     recomp::overlays::init_overlays();
 
     // Load overlays in the first 1MB
-    load_overlays(0x1000, (int32_t)entrypoint, 1024 * 1024);
+    // Gex 3: only the main segment is statically mapped; engine-loaded overlay
+    // sections live below rom 0x101000 and must not be spuriously loaded here.
+    load_overlays(0x1000, (int32_t)entrypoint, 0x8AFD0);
 
     // Initial 1MB DMA (rom address 0x1000 = physical address 0x10001000)
     recomp::do_rom_read(rdram, entrypoint, 0x10001000, 0x100000);
